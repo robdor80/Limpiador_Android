@@ -21,6 +21,7 @@ data class CleanerSettings(
     val days: Int = 15,
     val mode: CleanMode = CleanMode.REVIEW,
     val automaticEnabled: Boolean = false,
+    val notificationPermissionAsked: Boolean = false,
     val frequency: Frequency = Frequency.DAILY,
     val exclusions: Set<String> = emptySet(),
     val lastAnalysis: Long? = null,
@@ -34,6 +35,7 @@ class SettingsRepository(private val context: Context) {
         val DAYS = intPreferencesKey("days")
         val MODE = stringPreferencesKey("mode")
         val AUTO = booleanPreferencesKey("automatic_enabled")
+        val NOTIFICATION_PERMISSION_ASKED = booleanPreferencesKey("notification_permission_asked")
         val FREQUENCY = stringPreferencesKey("frequency")
         val EXCLUSIONS = stringSetPreferencesKey("exclusions")
         val LAST_ANALYSIS = stringPreferencesKey("last_analysis")
@@ -46,6 +48,7 @@ class SettingsRepository(private val context: Context) {
             activeFolderPath = p[Keys.ACTIVE_FOLDER],
             mode = runCatching { CleanMode.valueOf(p[Keys.MODE] ?: "REVIEW") }.getOrDefault(CleanMode.REVIEW),
             automaticEnabled = p[Keys.AUTO] ?: false,
+            notificationPermissionAsked = p[Keys.NOTIFICATION_PERMISSION_ASKED] ?: false,
             frequency = runCatching { Frequency.valueOf(p[Keys.FREQUENCY] ?: "DAILY") }.getOrDefault(Frequency.DAILY),
             exclusions = p[Keys.EXCLUSIONS] ?: emptySet(),
             lastAnalysis = p[Keys.LAST_ANALYSIS]?.toLongOrNull(),
@@ -58,6 +61,7 @@ class SettingsRepository(private val context: Context) {
     suspend fun setDays(days: Int) = context.dataStore.edit { it[Keys.DAYS] = days.coerceAtLeast(0) }
     suspend fun setMode(mode: CleanMode) = context.dataStore.edit { it[Keys.MODE] = mode.name }
     suspend fun setAutomatic(enabled: Boolean) = context.dataStore.edit { it[Keys.AUTO] = enabled }
+    suspend fun setNotificationPermissionAsked() = context.dataStore.edit { it[Keys.NOTIFICATION_PERMISSION_ASKED] = true }
     suspend fun setFrequency(frequency: Frequency) = context.dataStore.edit { it[Keys.FREQUENCY] = frequency.name }
     suspend fun addExclusion(path: String) = context.dataStore.edit {
         it[Keys.EXCLUSIONS] = (it[Keys.EXCLUSIONS] ?: emptySet()) + path

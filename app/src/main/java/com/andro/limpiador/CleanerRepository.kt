@@ -46,11 +46,16 @@ class CleanerRepository {
             ?: return@withContext DeleteResult(0, selectedUris.size)
         var deleted = 0
         var failed = 0
+        var freedBytes = 0L
         selectedUris.forEach { uri ->
             val target = allowed[uri]
-            if (target == null) failed++ else if (deleteSafely(target, rootCanonical)) deleted++ else failed++
+            val sizeBeforeDelete = target?.length()?.coerceAtLeast(0L) ?: 0L
+            if (target == null) failed++ else if (deleteSafely(target, rootCanonical)) {
+                deleted++
+                freedBytes += sizeBeforeDelete
+            } else failed++
         }
-        DeleteResult(deleted, failed)
+        DeleteResult(deleted, failed, freedBytes)
     }
 
     private data class Summary(val size: Long, val files: Int, val folders: Int, val preview: List<String>)
@@ -120,4 +125,4 @@ class CleanerRepository {
         Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
 }
 
-data class DeleteResult(val deleted: Int, val failed: Int)
+data class DeleteResult(val deleted: Int, val failed: Int, val freedBytes: Long = 0L)

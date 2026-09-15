@@ -1,6 +1,8 @@
 package com.andro.limpiador
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -123,6 +125,7 @@ private fun CleanerApp() {
         hasStorageAccess = hasAllFilesAccess()
         status = if (hasStorageAccess) "Acceso a Descargas concedido." else "Falta conceder acceso a todos los archivos."
     }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     fun removeSelection() {
         scope.launch {
@@ -311,7 +314,18 @@ private fun CleanerApp() {
                             Text("Análisis programado", style = MaterialTheme.typography.titleSmall)
                             Text("Ejecutar automáticamente en segundo plano", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Switch(checked = settings.automaticEnabled, onCheckedChange = { scope.launch { settingsRepo.setAutomatic(it) } })
+                        Switch(checked = settings.automaticEnabled, onCheckedChange = { enabled ->
+                            scope.launch { settingsRepo.setAutomatic(enabled) }
+                            if (
+                                enabled &&
+                                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+                                !settings.notificationPermissionAsked
+                            ) {
+                                scope.launch { settingsRepo.setNotificationPermissionAsked() }
+                                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            }
+                        })
                     }
                     Text(
                         "Frecuencia",
@@ -500,7 +514,7 @@ private fun hasAllFilesAccess(): Boolean =
 
 private fun configurePeriodicCleanup(context: android.content.Context, settings: CleanerSettings) {
     val workManager = WorkManager.getInstance(context)
-    if (!settings.automaticEnabled || settings.mode != CleanMode.AUTOMATIC) {
+    if (!settings.automaticEnabled) {
         workManager.cancelUniqueWork("periodic_cleanup")
         return
     }
