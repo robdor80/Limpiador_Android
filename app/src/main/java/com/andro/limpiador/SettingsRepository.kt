@@ -17,6 +17,7 @@ enum class Frequency { DAILY, WEEKLY }
 
 data class CleanerSettings(
     val treeUri: String? = null,
+    val activeFolderPath: String? = null,
     val days: Int = 15,
     val mode: CleanMode = CleanMode.REVIEW,
     val automaticEnabled: Boolean = false,
@@ -29,6 +30,7 @@ data class CleanerSettings(
 class SettingsRepository(private val context: Context) {
     private object Keys {
         val URI = stringPreferencesKey("tree_uri")
+        val ACTIVE_FOLDER = stringPreferencesKey("active_folder")
         val DAYS = intPreferencesKey("days")
         val MODE = stringPreferencesKey("mode")
         val AUTO = booleanPreferencesKey("automatic_enabled")
@@ -41,6 +43,7 @@ class SettingsRepository(private val context: Context) {
     val settings: Flow<CleanerSettings> = context.dataStore.data.map { p ->
         CleanerSettings(
             treeUri = p[Keys.URI], days = (p[Keys.DAYS] ?: 15).coerceAtLeast(0),
+            activeFolderPath = p[Keys.ACTIVE_FOLDER],
             mode = runCatching { CleanMode.valueOf(p[Keys.MODE] ?: "REVIEW") }.getOrDefault(CleanMode.REVIEW),
             automaticEnabled = p[Keys.AUTO] ?: false,
             frequency = runCatching { Frequency.valueOf(p[Keys.FREQUENCY] ?: "DAILY") }.getOrDefault(Frequency.DAILY),
@@ -51,6 +54,7 @@ class SettingsRepository(private val context: Context) {
     }
 
     suspend fun setFolder(uri: String) = context.dataStore.edit { it[Keys.URI] = uri }
+    suspend fun setActiveFolder(path: String) = context.dataStore.edit { it[Keys.ACTIVE_FOLDER] = path }
     suspend fun setDays(days: Int) = context.dataStore.edit { it[Keys.DAYS] = days.coerceAtLeast(0) }
     suspend fun setMode(mode: CleanMode) = context.dataStore.edit { it[Keys.MODE] = mode.name }
     suspend fun setAutomatic(enabled: Boolean) = context.dataStore.edit { it[Keys.AUTO] = enabled }

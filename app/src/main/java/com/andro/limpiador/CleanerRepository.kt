@@ -20,11 +20,9 @@ data class Candidate(
 )
 
 class CleanerRepository {
-    suspend fun analyze(days: Int, excludedPaths: Set<String> = emptySet()): List<Candidate> = withContext(Dispatchers.IO) {
-        val root = downloadsDirectory()
-        if (!root.isDirectory) return@withContext emptyList()
-        val rootCanonical = runCatching { root.canonicalFile }.getOrElse { return@withContext emptyList() }
-        val children = root.listFiles() ?: return@withContext emptyList()
+    suspend fun analyze(days: Int, excludedPaths: Set<String> = emptySet(), activeFolderPath: String? = null): List<Candidate> = withContext(Dispatchers.IO) {
+        val rootCanonical = activeDirectory(activeFolderPath) ?: return@withContext emptyList()
+        val children = rootCanonical.listFiles() ?: return@withContext emptyList()
         val cutoff = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(days.toLong())
         children.mapNotNull { file ->
             if (!isDirectChild(file, rootCanonical)) return@mapNotNull null
@@ -42,10 +40,9 @@ class CleanerRepository {
         }.sortedWith(compareByDescending<Candidate> { it.isDirectory }.thenBy { it.name.lowercase() })
     }
 
-    suspend fun deleteSelected(selectedUris: Set<Uri>): DeleteResult = withContext(Dispatchers.IO) {
-        val root = downloadsDirectory()
-        val rootCanonical = runCatching { root.canonicalFile }.getOrElse { return@withContext DeleteResult(0, selectedUris.size) }
-        val allowed = root.listFiles()?.filter { isDirectChild(it, rootCanonical) }?.associateBy { Uri.fromFile(it) }
+    suspend fun deleteSelected(selectedUris: Set<Uri>, activeFolderPath: String? = null): DeleteResult = withContext(Dispatchers.IO) {
+        val rootCanonical = activeDirectory(activeFolderPath) ?: return@withContext DeleteResult(0, selectedUris.size)
+        val allowed = rootCanonical.listFiles()?.filter { isDirectChild(it, rootCanonical) }?.associateBy { Uri.fromFile(it.canonicalFile) }
             ?: return@withContext DeleteResult(0, selectedUris.size)
         var deleted = 0
         var failed = 0
@@ -63,7 +60,7 @@ class CleanerRepository {
         val children = folder.listFiles()?.toList() ?: return Summary(0, 0, 0, listOf("No se pudo leer"))
         val preview = children.take(5).map { it.name.ifBlank { "(sin nombre)" } }
         fun visit(item: File) {
-            if (!isInsideDownloads(item, root)) return
+            if (!isInsideActiveFolder(item, root)) return
             if (item.isDirectory) {
                 folders++
                 item.listFiles()?.forEach(::visit)
@@ -74,7 +71,7 @@ class CleanerRepository {
     }
 
     private fun deleteSafely(file: File, root: File): Boolean {
-        if (!isInsideDownloads(file, root)) return false
+        if (!isInsideActiveFolder(file, root)) return false
         if (file.isDirectory) {
             val children = file.listFiles()?.toList() ?: return false
             if (children.any { !deleteSafely(it, root) }) return false
@@ -85,9 +82,38 @@ class CleanerRepository {
     private fun isDirectChild(file: File, root: File): Boolean =
         runCatching { file.canonicalFile.parentFile == root }.getOrDefault(false)
 
-    private fun isInsideDownloads(file: File, root: File): Boolean = runCatching {
+    private fun isInsideActiveFolder(file: File, root: File): Boolean = runCatching {
         file.canonicalPath.startsWith(root.canonicalPath + File.separator)
     }.getOrDefault(false)
+
+    fun activeDirectory(activeFolderPath: String?): File? {
+        val candidate = if (activeFolderPath == null) downloadsDirectory() else File(activeFolderPath)
+        return selectableDirectory(candidate)
+    }
+
+    fun sharedStorageRoot(): File? = runCatching {
+        val root = Environment.getExternalStorageDirectory().canonicalFile
+        root.takeIf { it.isDirectory && it.canRead() }
+    }.getOrNull()
+
+    fun browsableDirectory(directory: File): File? = runCatching {
+        val root = sharedStorageRoot() ?: return@runCatching null
+        val canonical = directory.canonicalFile
+        canonical.takeIf { it.isDirectory && it.canRead() && (canonical == root || isInsideActiveFolder(canonical, root)) }
+    }.getOrNull()
+
+    fun selectableDirectory(directory: File): File? = runCatching {
+        val root = sharedStorageRoot() ?: return@runCatching null
+        val canonical = directory.canonicalFile
+        canonical.takeIf { it.isDirectory && it.canRead() && it.canWrite() && canonical != root && isInsideActiveFolder(canonical, root) }
+    }.getOrNull()
+
+    fun childDirectories(directory: File): List<File> = browsableDirectory(directory)
+        ?.listFiles()
+        ?.mapNotNull(::browsableDirectory)
+        ?.filter { it != sharedStorageRoot() }
+        ?.sortedBy { it.name.lowercase() }
+        ?: emptyList()
 
     @Suppress("DEPRECATION")
     private fun downloadsDirectory(): File =

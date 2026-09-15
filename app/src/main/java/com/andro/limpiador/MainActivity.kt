@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -30,6 +31,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -90,7 +93,14 @@ private fun CleanerApp() {
     var status by remember { mutableStateOf<String?>(null) }
     var confirmFolders by remember { mutableStateOf(false) }
     var showExclusions by remember { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(false) }
+    var showFolderPicker by remember { mutableStateOf(false) }
+    var pickerDirectory by remember { mutableStateOf<File?>(null) }
     var daysText by remember { mutableStateOf(settings.days.toString()) }
+    val activeFolder = cleanerRepo.activeDirectory(settings.activeFolderPath)
+    val activeExclusions = activeFolder?.let { folder ->
+        settings.exclusions.filter { exclusionBelongsToFolder(it, folder) }
+    }.orEmpty()
 
     LaunchedEffect(settings.days) {
         if (daysText != settings.days.toString()) daysText = settings.days.toString()
@@ -115,7 +125,7 @@ private fun CleanerApp() {
 
     fun removeSelection() {
         scope.launch {
-            val result = cleanerRepo.deleteSelected(selected)
+            val result = cleanerRepo.deleteSelected(selected, settings.activeFolderPath)
             if (result.deleted > 0) settingsRepo.markCleanup()
             status = "Eliminados: ${result.deleted}. Errores o elementos conservados: ${result.failed}."
             candidates = candidates.filterNot { it.uri in selected }
@@ -137,11 +147,11 @@ private fun CleanerApp() {
     if (showExclusions) {
         AlertDialog(
             onDismissRequest = { showExclusions = false },
-            title = { Text("Exclusiones (${settings.exclusions.size})") },
+            title = { Text("Exclusiones (${activeExclusions.size})") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (settings.exclusions.isEmpty()) Text("No hay archivos excluidos.")
-                    settings.exclusions.sorted().forEach { path ->
+                    if (activeExclusions.isEmpty()) Text("No hay archivos excluidos en esta carpeta.")
+                    activeExclusions.sorted().forEach { path ->
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text(File(path).name, modifier = Modifier.weight(1f))
                             TextButton(onClick = { scope.launch { settingsRepo.removeExclusion(path) } }) { Text("Quitar exclusión") }
@@ -153,26 +163,84 @@ private fun CleanerApp() {
         )
     }
 
+    if (showFolderPicker) {
+        val root = cleanerRepo.sharedStorageRoot()
+        val current = pickerDirectory?.let(cleanerRepo::browsableDirectory) ?: root
+        val folders = current?.let(cleanerRepo::childDirectories).orEmpty()
+        val selectable = current?.let(cleanerRepo::selectableDirectory)
+        AlertDialog(
+            onDismissRequest = { showFolderPicker = false },
+            title = { Text("Escoger carpeta") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(current?.let { displayFolderPath(it, root) } ?: "Almacenamiento no disponible", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val parent = current?.parentFile?.let(cleanerRepo::browsableDirectory)
+                    TextButton(enabled = parent != null, onClick = { pickerDirectory = parent }) { Text("↑ Carpeta superior") }
+                    LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
+                        if (folders.isEmpty()) item { Text("No hay carpetas disponibles.", style = MaterialTheme.typography.bodySmall) }
+                        items(folders, key = { it.path }) { folder ->
+                            TextButton(modifier = Modifier.fillMaxWidth(), onClick = { pickerDirectory = folder }) {
+                                Text(folder.name.ifBlank { "(sin nombre)" })
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(enabled = selectable != null, onClick = {
+                    val selectedFolder = selectable ?: return@Button
+                    scope.launch { settingsRepo.setActiveFolder(selectedFolder.path) }
+                    candidates = emptyList()
+                    selected = emptySet()
+                    status = "Carpeta activa: ${selectedFolder.name}"
+                    showFolderPicker = false
+                }) { Text("Usar esta carpeta") }
+            },
+            dismissButton = { TextButton(onClick = { showFolderPicker = false }) { Text("Cancelar") } }
+        )
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        item { Text("Limpiador de descargas", style = MaterialTheme.typography.titleLarge) }
+        item {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Limpiador de descargas", style = MaterialTheme.typography.titleLarge)
+                Box {
+                    TextButton(onClick = { showMenu = true }) { Text("☰") }
+                    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                        DropdownMenuItem(text = { Text("Escoger carpeta") }, onClick = {
+                            pickerDirectory = cleanerRepo.sharedStorageRoot()
+                            showMenu = false
+                            showFolderPicker = true
+                        })
+                    }
+                }
+            }
+        }
         item {
             Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
                 Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Column(Modifier.weight(1f)) {
-                            Text("Descargas", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                when {
+                                    settings.activeFolderPath == null -> "Descargas"
+                                    activeFolder != null -> activeFolder.name
+                                    else -> File(settings.activeFolderPath.orEmpty()).name.ifBlank { "Carpeta no disponible" }
+                                },
+                                style = MaterialTheme.typography.titleMedium
+                            )
                             Surface(
-                                color = if (hasStorageAccess) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer,
+                                color = if (activeFolder != null && hasStorageAccess) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer,
                                 shape = MaterialTheme.shapes.small,
                                 modifier = Modifier.padding(top = 4.dp)
                             ) {
                                 Text(
-                                    if (hasStorageAccess) "Acceso concedido" else "Acceso necesario",
+                                    if (activeFolder == null) "Carpeta no disponible" else if (hasStorageAccess) "Acceso concedido" else "Acceso necesario",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = if (hasStorageAccess) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer,
+                                    color = if (activeFolder != null && hasStorageAccess) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                                 )
                             }
@@ -192,7 +260,7 @@ private fun CleanerApp() {
                         }
                     }
                     TextButton(onClick = { showExclusions = true }, modifier = Modifier.padding(top = 1.dp)) {
-                        Text("Gestionar exclusiones · ${settings.exclusions.size}")
+                        Text("Gestionar exclusiones · ${activeExclusions.size}")
                     }
                 }
             }
@@ -259,13 +327,14 @@ private fun CleanerApp() {
                 val daysForAnalysis = commitDays()
                 hasStorageAccess = hasAllFilesAccess()
                 if (!hasStorageAccess) { status = "Concede primero acceso a todos los archivos."; return@Button }
+                if (activeFolder == null) { status = "La carpeta activa no está disponible. Escoge otra carpeta."; return@Button }
                 scope.launch {
-                    runCatching { cleanerRepo.analyze(daysForAnalysis, settings.exclusions) }.onSuccess { found ->
+                    runCatching { cleanerRepo.analyze(daysForAnalysis, settings.exclusions, settings.activeFolderPath) }.onSuccess { found ->
                         settingsRepo.markAnalysis()
                         candidates = found
                         if (settings.mode == CleanMode.AUTOMATIC) {
                             val files = found.filter { !it.isDirectory }.map { it.uri }.toSet()
-                            val result = cleanerRepo.deleteSelected(files)
+                            val result = cleanerRepo.deleteSelected(files, settings.activeFolderPath)
                             if (result.deleted > 0) settingsRepo.markCleanup()
                             candidates = found.filter { it.isDirectory }
                             selected = emptySet()
@@ -392,6 +461,16 @@ private fun fileTypeLabel(name: String): String = when (name.substringAfterLast(
     "jpg", "jpeg", "png", "webp", "gif" -> "Imagen"
     "doc", "docx", "txt", "odt" -> "Documento"
     else -> "Archivo"
+}
+
+private fun exclusionBelongsToFolder(path: String, folder: File): Boolean = runCatching {
+    path.startsWith(folder.canonicalPath + File.separator)
+}.getOrDefault(false)
+
+private fun displayFolderPath(folder: File, root: File?): String {
+    if (root == null) return folder.name
+    val relative = folder.path.removePrefix(root.path).trimStart(File.separatorChar)
+    return relative.ifEmpty { "Almacenamiento compartido" }
 }
 
 private fun formatBytes(bytes: Long): String = when {
