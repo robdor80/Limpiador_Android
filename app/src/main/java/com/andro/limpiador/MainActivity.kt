@@ -2,7 +2,10 @@ package com.andro.limpiador
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.enableEdgeToEdge
@@ -14,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
@@ -57,36 +61,27 @@ class MainActivity : ComponentActivity() {
 private fun CleanerApp() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val settingsRepo = remember { SettingsRepository(context.applicationContext) }
-    val cleanerRepo = remember { CleanerRepository(context.applicationContext) }
+    val cleanerRepo = remember { CleanerRepository() }
     val settings by settingsRepo.settings.collectAsState(initial = CleanerSettings())
     val scope = rememberCoroutineScope()
     var candidates by remember { mutableStateOf<List<Candidate>>(emptyList()) }
     var selected by remember { mutableStateOf<Set<Uri>>(emptySet()) }
     var status by remember { mutableStateOf<String?>(null) }
     var confirmFolders by remember { mutableStateOf(false) }
+    var hasStorageAccess by remember { mutableStateOf(hasAllFilesAccess()) }
 
-    LaunchedEffect(settings.automaticEnabled, settings.frequency, settings.mode, settings.treeUri) {
+    LaunchedEffect(settings.automaticEnabled, settings.frequency, settings.mode) {
         configurePeriodicCleanup(context, settings)
     }
 
-    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) {
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(
-                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                )
-            }.onSuccess {
-                scope.launch { settingsRepo.setFolder(uri.toString()) }
-                status = "Carpeta autorizada y permiso guardado."
-                candidates = emptyList(); selected = emptySet()
-            }.onFailure { status = "No se pudo conservar el permiso de la carpeta." }
-        }
+    val accessSettingsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        hasStorageAccess = hasAllFilesAccess()
+        status = if (hasStorageAccess) "Acceso a Descargas concedido." else "Falta conceder acceso a todos los archivos."
     }
 
     fun removeSelection() {
-        val treeUri = settings.treeUri?.let(Uri::parse) ?: return
         scope.launch {
-            val result = cleanerRepo.deleteSelected(treeUri, selected)
+            val result = cleanerRepo.deleteSelected(selected)
             if (result.deleted > 0) settingsRepo.markCleanup()
             status = "Eliminados: ${result.deleted}. Errores o elementos conservados: ${result.failed}."
             candidates = candidates.filterNot { it.uri in selected }
@@ -106,7 +101,7 @@ private fun CleanerApp() {
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
+        modifier = Modifier.fillMaxSize().statusBarsPadding().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         item { Text("LIMPIADOR DE DESCARGAS", style = MaterialTheme.typography.headlineSmall) }
@@ -114,10 +109,23 @@ private fun CleanerApp() {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column(Modifier.weight(1f)) {
                     Text("Carpeta")
-                    Text(settings.treeUri?.let { Uri.parse(it).lastPathSegment ?: "Carpeta seleccionada" } ?: "Sin seleccionar")
+                    Text("Descargas")
                 }
-                Button(onClick = { folderPicker.launch(null) }) { Text("Cambiar") }
+                if (!hasStorageAccess) {
+                    Button(onClick = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            val appIntent = Intent(
+                                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                Uri.parse("package:${context.packageName}")
+                            )
+                            runCatching { accessSettingsLauncher.launch(appIntent) }.onFailure {
+                                accessSettingsLauncher.launch(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                            }
+                        }
+                    }) { Text("Conceder acceso") }
+                }
             }
+            Text(if (hasStorageAccess) "Acceso concedido" else "Se necesita acceso a todos los archivos")
         }
         item {
             OutlinedTextField(
@@ -142,15 +150,15 @@ private fun CleanerApp() {
         }
         item {
             Button(modifier = Modifier.fillMaxWidth(), onClick = {
-                val treeUri = settings.treeUri?.let(Uri::parse)
-                if (treeUri == null) { status = "Primero selecciona una carpeta."; return@Button }
+                hasStorageAccess = hasAllFilesAccess()
+                if (!hasStorageAccess) { status = "Concede primero acceso a todos los archivos."; return@Button }
                 scope.launch {
-                    runCatching { cleanerRepo.analyze(treeUri, settings.days) }.onSuccess { found ->
+                    runCatching { cleanerRepo.analyze(settings.days) }.onSuccess { found ->
                         settingsRepo.markAnalysis()
                         candidates = found
                         if (settings.mode == CleanMode.AUTOMATIC) {
                             val files = found.filter { !it.isDirectory }.map { it.uri }.toSet()
-                            val result = cleanerRepo.deleteSelected(treeUri, files)
+                            val result = cleanerRepo.deleteSelected(files)
                             if (result.deleted > 0) settingsRepo.markCleanup()
                             candidates = found.filter { it.isDirectory }
                             selected = emptySet()
@@ -227,9 +235,12 @@ private fun formatBytes(bytes: Long): String = when {
 
 private fun formatDate(value: Long?): String = value?.let { DateFormat.getDateTimeInstance().format(Date(it)) } ?: "Nunca"
 
+private fun hasAllFilesAccess(): Boolean =
+    Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
+
 private fun configurePeriodicCleanup(context: android.content.Context, settings: CleanerSettings) {
     val workManager = WorkManager.getInstance(context)
-    if (!settings.automaticEnabled || settings.mode != CleanMode.AUTOMATIC || settings.treeUri == null) {
+    if (!settings.automaticEnabled || settings.mode != CleanMode.AUTOMATIC) {
         workManager.cancelUniqueWork("periodic_cleanup")
         return
     }
