@@ -131,7 +131,7 @@ private fun CleanerApp() {
         item {
             OutlinedTextField(
                 value = settings.days.toString(),
-                onValueChange = { value -> value.toIntOrNull()?.takeIf { it > 0 }?.let { scope.launch { settingsRepo.setDays(it) } } },
+                onValueChange = { value -> value.toIntOrNull()?.takeIf { it >= 0 }?.let { scope.launch { settingsRepo.setDays(it) } } },
                 label = { Text("Eliminar archivos con más de días") }, singleLine = true, modifier = Modifier.fillMaxWidth()
             )
         }
@@ -190,7 +190,7 @@ private fun CleanerApp() {
             }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = { selected = emptySet() }) { Text("Cancelar") }
+                    TextButton(onClick = { candidates = emptyList(); selected = emptySet(); status = null }) { Text("Cancelar") }
                     Button(enabled = selected.isNotEmpty(), onClick = {
                         if (candidates.any { it.uri in selected && it.isDirectory }) confirmFolders = true else removeSelection()
                     }) { Text("Eliminar seleccionados") }

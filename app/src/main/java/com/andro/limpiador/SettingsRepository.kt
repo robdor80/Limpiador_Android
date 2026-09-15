@@ -37,7 +37,7 @@ class SettingsRepository(private val context: Context) {
 
     val settings: Flow<CleanerSettings> = context.dataStore.data.map { p ->
         CleanerSettings(
-            treeUri = p[Keys.URI], days = (p[Keys.DAYS] ?: 15).coerceAtLeast(1),
+            treeUri = p[Keys.URI], days = (p[Keys.DAYS] ?: 15).coerceAtLeast(0),
             mode = runCatching { CleanMode.valueOf(p[Keys.MODE] ?: "REVIEW") }.getOrDefault(CleanMode.REVIEW),
             automaticEnabled = p[Keys.AUTO] ?: false,
             frequency = runCatching { Frequency.valueOf(p[Keys.FREQUENCY] ?: "DAILY") }.getOrDefault(Frequency.DAILY),
@@ -47,7 +47,7 @@ class SettingsRepository(private val context: Context) {
     }
 
     suspend fun setFolder(uri: String) = context.dataStore.edit { it[Keys.URI] = uri }
-    suspend fun setDays(days: Int) = context.dataStore.edit { it[Keys.DAYS] = days.coerceAtLeast(1) }
+    suspend fun setDays(days: Int) = context.dataStore.edit { it[Keys.DAYS] = days.coerceAtLeast(0) }
     suspend fun setMode(mode: CleanMode) = context.dataStore.edit { it[Keys.MODE] = mode.name }
     suspend fun setAutomatic(enabled: Boolean) = context.dataStore.edit { it[Keys.AUTO] = enabled }
     suspend fun setFrequency(frequency: Frequency) = context.dataStore.edit { it[Keys.FREQUENCY] = frequency.name }
