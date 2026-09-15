@@ -32,6 +32,8 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,7 +43,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
@@ -71,6 +76,18 @@ private fun CleanerApp() {
     var status by remember { mutableStateOf<String?>(null) }
     var confirmFolders by remember { mutableStateOf(false) }
     var showExclusions by remember { mutableStateOf(false) }
+    var daysText by remember { mutableStateOf(settings.days.toString()) }
+
+    LaunchedEffect(settings.days) {
+        if (daysText != settings.days.toString()) daysText = settings.days.toString()
+    }
+
+    fun commitDays(): Int {
+        val days = daysText.toIntOrNull()?.coerceAtLeast(0) ?: 0
+        daysText = days.toString()
+        scope.launch { settingsRepo.setDays(days) }
+        return days
+    }
     var hasStorageAccess by remember { mutableStateOf(hasAllFilesAccess()) }
 
     LaunchedEffect(settings.automaticEnabled, settings.frequency, settings.mode) {
@@ -154,9 +171,18 @@ private fun CleanerApp() {
         }
         item {
             OutlinedTextField(
-                value = settings.days.toString(),
-                onValueChange = { value -> value.toIntOrNull()?.takeIf { it >= 0 }?.let { scope.launch { settingsRepo.setDays(it) } } },
-                label = { Text("Eliminar archivos con más de días") }, singleLine = true, modifier = Modifier.fillMaxWidth()
+                value = daysText,
+                onValueChange = { value ->
+                    if (value.all { it in '0'..'9' }) {
+                        daysText = value
+                        value.toIntOrNull()?.let { scope.launch { settingsRepo.setDays(it) } }
+                    }
+                },
+                label = { Text("Eliminar archivos con más de días") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { commitDays() }),
+                modifier = Modifier.fillMaxWidth().onFocusChanged { if (!it.isFocused) commitDays() }
             )
         }
         item {
@@ -175,10 +201,11 @@ private fun CleanerApp() {
         }
         item {
             Button(modifier = Modifier.fillMaxWidth(), onClick = {
+                val daysForAnalysis = commitDays()
                 hasStorageAccess = hasAllFilesAccess()
                 if (!hasStorageAccess) { status = "Concede primero acceso a todos los archivos."; return@Button }
                 scope.launch {
-                    runCatching { cleanerRepo.analyze(settings.days, settings.exclusions) }.onSuccess { found ->
+                    runCatching { cleanerRepo.analyze(daysForAnalysis, settings.exclusions) }.onSuccess { found ->
                         settingsRepo.markAnalysis()
                         candidates = found
                         if (settings.mode == CleanMode.AUTOMATIC) {
