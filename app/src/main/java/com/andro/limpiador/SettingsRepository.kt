@@ -1,6 +1,7 @@
 package com.andro.limpiador
 
 import android.content.Context
+import android.os.Environment
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -18,6 +19,7 @@ enum class Frequency { DAILY, WEEKLY }
 data class CleanerSettings(
     val treeUri: String? = null,
     val activeFolderPath: String? = null,
+    val selectedFolderPaths: Set<String> = emptySet(),
     val days: Int = 15,
     val mode: CleanMode = CleanMode.REVIEW,
     val automaticEnabled: Boolean = false,
@@ -32,6 +34,7 @@ class SettingsRepository(private val context: Context) {
     private object Keys {
         val URI = stringPreferencesKey("tree_uri")
         val ACTIVE_FOLDER = stringPreferencesKey("active_folder")
+        val SELECTED_FOLDERS = stringSetPreferencesKey("selected_folders")
         val DAYS = intPreferencesKey("days")
         val MODE = stringPreferencesKey("mode")
         val AUTO = booleanPreferencesKey("automatic_enabled")
@@ -43,9 +46,15 @@ class SettingsRepository(private val context: Context) {
     }
 
     val settings: Flow<CleanerSettings> = context.dataStore.data.map { p ->
+        val selectedFolders = if (p.contains(Keys.SELECTED_FOLDERS)) {
+            p[Keys.SELECTED_FOLDERS] ?: emptySet()
+        } else {
+            p[Keys.ACTIVE_FOLDER]?.let(::setOf) ?: setOf(defaultDownloadsPath())
+        }
         CleanerSettings(
             treeUri = p[Keys.URI], days = (p[Keys.DAYS] ?: 15).coerceAtLeast(0),
             activeFolderPath = p[Keys.ACTIVE_FOLDER],
+            selectedFolderPaths = selectedFolders,
             mode = runCatching { CleanMode.valueOf(p[Keys.MODE] ?: "REVIEW") }.getOrDefault(CleanMode.REVIEW),
             automaticEnabled = p[Keys.AUTO] ?: false,
             notificationPermissionAsked = p[Keys.NOTIFICATION_PERMISSION_ASKED] ?: false,
@@ -58,6 +67,13 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setFolder(uri: String) = context.dataStore.edit { it[Keys.URI] = uri }
     suspend fun setActiveFolder(path: String) = context.dataStore.edit { it[Keys.ACTIVE_FOLDER] = path }
+    suspend fun setSelectedFolders(paths: Set<String>) = context.dataStore.edit { it[Keys.SELECTED_FOLDERS] = paths }
+    suspend fun migrateSelectedFoldersIfNeeded() = context.dataStore.edit { preferences ->
+        if (!preferences.contains(Keys.SELECTED_FOLDERS)) {
+            preferences[Keys.SELECTED_FOLDERS] = preferences[Keys.ACTIVE_FOLDER]?.let(::setOf)
+                ?: setOf(defaultDownloadsPath())
+        }
+    }
     suspend fun setDays(days: Int) = context.dataStore.edit { it[Keys.DAYS] = days.coerceAtLeast(0) }
     suspend fun setMode(mode: CleanMode) = context.dataStore.edit { it[Keys.MODE] = mode.name }
     suspend fun setAutomatic(enabled: Boolean) = context.dataStore.edit { it[Keys.AUTO] = enabled }
@@ -71,4 +87,10 @@ class SettingsRepository(private val context: Context) {
     }
     suspend fun markAnalysis() = context.dataStore.edit { it[Keys.LAST_ANALYSIS] = System.currentTimeMillis().toString() }
     suspend fun markCleanup() = context.dataStore.edit { it[Keys.LAST_CLEANUP] = System.currentTimeMillis().toString() }
+
+    @Suppress("DEPRECATION")
+    private fun defaultDownloadsPath(): String {
+        val folder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        return runCatching { folder.canonicalPath }.getOrDefault(folder.absolutePath)
+    }
 }

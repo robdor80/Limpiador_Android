@@ -11,6 +11,7 @@ data class Candidate(
     val uri: Uri,
     val canonicalPath: String,
     val name: String,
+    val sourceFolder: String,
     val isDirectory: Boolean,
     val lastModified: Long,
     val sizeBytes: Long,
@@ -19,38 +20,76 @@ data class Candidate(
     val preview: List<String> = emptyList()
 )
 
+data class AnalysisResult(
+    val candidates: List<Candidate>,
+    val analyzedFolders: Int,
+    val unavailableFolders: Int
+)
+
+data class SelectedRoots(val valid: List<File>, val unavailable: Int)
+
 class CleanerRepository {
-    suspend fun analyze(days: Int, excludedPaths: Set<String> = emptySet(), activeFolderPath: String? = null): List<Candidate> = withContext(Dispatchers.IO) {
-        val rootCanonical = activeDirectory(activeFolderPath) ?: return@withContext emptyList()
-        val children = rootCanonical.listFiles() ?: return@withContext emptyList()
+    suspend fun analyze(days: Int, excludedPaths: Set<String>, selectedFolderPaths: Set<String>): AnalysisResult = withContext(Dispatchers.IO) {
+        val roots = resolveSelectedDirectories(selectedFolderPaths)
+        // If roots overlap, the outer root already covers the nested one.
+        val analysisRoots = roots.valid.filter { root ->
+            roots.valid.none { other -> other != root && isInsideActiveFolder(root, other) }
+        }
+        val candidatesByPath = linkedMapOf<String, Candidate>()
+        var analyzedFolders = 0
+        var unavailableFolders = roots.unavailable
         val cutoff = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(days.toLong())
-        children.mapNotNull { file ->
-            if (!isDirectChild(file, rootCanonical)) return@mapNotNull null
-            val canonicalFile = runCatching { file.canonicalFile }.getOrElse { return@mapNotNull null }
-            if (canonicalFile.path in excludedPaths) return@mapNotNull null
-            // A missing/invalid timestamp is uncertain: preserve the item.
-            val modified = file.lastModified()
-            if (modified <= 0L || modified >= cutoff) return@mapNotNull null
-            if (file.isDirectory) {
-                val summary = summarize(file, rootCanonical)
-                Candidate(Uri.fromFile(canonicalFile), canonicalFile.path, file.name.ifBlank { "(sin nombre)" }, true, modified, summary.size, summary.files, summary.folders, summary.preview)
-            } else if (file.isFile) {
-                Candidate(Uri.fromFile(canonicalFile), canonicalFile.path, file.name.ifBlank { "(sin nombre)" }, false, modified, file.length().coerceAtLeast(0L))
-            } else null
-        }.sortedWith(compareByDescending<Candidate> { it.isDirectory }.thenBy { it.name.lowercase() })
+        analysisRoots.forEach rootLoop@ { root ->
+            val children = root.listFiles()
+            if (children == null) {
+                unavailableFolders++
+                return@rootLoop
+            }
+            analyzedFolders++
+            children.forEach childLoop@ { file ->
+                if (!isDirectChild(file, root)) return@childLoop
+                val canonicalFile = runCatching { file.canonicalFile }.getOrElse { return@childLoop }
+                if (canonicalFile.path in candidatesByPath || canonicalFile.path in excludedPaths) return@childLoop
+                val modified = file.lastModified()
+                if (modified <= 0L || modified >= cutoff) return@childLoop
+                val sourceFolder = displayRoot(root)
+                val candidate = when {
+                    file.isDirectory -> {
+                        val summary = summarize(file, root)
+                        Candidate(Uri.fromFile(canonicalFile), canonicalFile.path, file.name.ifBlank { "(sin nombre)" }, sourceFolder, true, modified, summary.size, summary.files, summary.folders, summary.preview)
+                    }
+                    file.isFile -> Candidate(Uri.fromFile(canonicalFile), canonicalFile.path, file.name.ifBlank { "(sin nombre)" }, sourceFolder, false, modified, file.length().coerceAtLeast(0L))
+                    else -> null
+                }
+                if (candidate != null) candidatesByPath[canonicalFile.path] = candidate
+            }
+        }
+        AnalysisResult(
+            candidatesByPath.values.sortedWith(compareByDescending<Candidate> { it.isDirectory }.thenBy { it.name.lowercase() }),
+            analyzedFolders,
+            unavailableFolders
+        )
     }
 
-    suspend fun deleteSelected(selectedUris: Set<Uri>, activeFolderPath: String? = null): DeleteResult = withContext(Dispatchers.IO) {
-        val rootCanonical = activeDirectory(activeFolderPath) ?: return@withContext DeleteResult(0, selectedUris.size)
-        val allowed = rootCanonical.listFiles()?.filter { isDirectChild(it, rootCanonical) }?.associateBy { Uri.fromFile(it.canonicalFile) }
-            ?: return@withContext DeleteResult(0, selectedUris.size)
+    suspend fun deleteSelected(selectedUris: Set<Uri>, selectedFolderPaths: Set<String>): DeleteResult = withContext(Dispatchers.IO) {
+        val roots = resolveSelectedDirectories(selectedFolderPaths).valid
+        data class Target(val file: File, val root: File)
+        val allowed = linkedMapOf<Uri, Target>()
+        roots.forEach { root ->
+            root.listFiles()?.forEach childLoop@ { file ->
+                if (!isDirectChild(file, root)) return@childLoop
+                runCatching { file.canonicalFile }.getOrNull()?.let { canonical ->
+                    allowed.putIfAbsent(Uri.fromFile(canonical), Target(canonical, root))
+                }
+            }
+        }
         var deleted = 0
         var failed = 0
         var freedBytes = 0L
         selectedUris.forEach { uri ->
             val target = allowed[uri]
-            val sizeBeforeDelete = target?.length()?.coerceAtLeast(0L) ?: 0L
-            if (target == null) failed++ else if (deleteSafely(target, rootCanonical)) {
+            val sizeBeforeDelete = target?.file?.length()?.coerceAtLeast(0L) ?: 0L
+            if (target == null) failed++ else if (deleteSafely(target.file, target.root)) {
                 deleted++
                 freedBytes += sizeBeforeDelete
             } else failed++
@@ -96,6 +135,16 @@ class CleanerRepository {
         return selectableDirectory(candidate)
     }
 
+    fun resolveSelectedDirectories(paths: Set<String>): SelectedRoots {
+        val valid = linkedMapOf<String, File>()
+        var unavailable = 0
+        paths.forEach { path ->
+            val directory = selectableDirectory(File(path))
+            if (directory == null) unavailable++ else valid[directory.path] = directory
+        }
+        return SelectedRoots(valid.values.toList(), unavailable)
+    }
+
     fun sharedStorageRoot(): File? = runCatching {
         val root = Environment.getExternalStorageDirectory().canonicalFile
         root.takeIf { it.isDirectory && it.canRead() }
@@ -119,6 +168,11 @@ class CleanerRepository {
         ?.filter { it != sharedStorageRoot() }
         ?.sortedBy { it.name.lowercase() }
         ?: emptyList()
+
+    private fun displayRoot(root: File): String {
+        val storage = sharedStorageRoot() ?: return root.name
+        return root.path.removePrefix(storage.path).trimStart(File.separatorChar).ifEmpty { root.name }
+    }
 
     @Suppress("DEPRECATION")
     private fun downloadsDirectory(): File =
