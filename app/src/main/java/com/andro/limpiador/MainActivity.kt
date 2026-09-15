@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -101,7 +102,7 @@ private fun CleanerApp() {
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().statusBarsPadding().padding(16.dp),
+        modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         item { Text("LIMPIADOR DE DESCARGAS", style = MaterialTheme.typography.headlineSmall) }
@@ -164,7 +165,8 @@ private fun CleanerApp() {
                             selected = emptySet()
                             status = "Automático: eliminados ${result.deleted} archivos. Las carpetas se han conservado para revisión."
                         } else {
-                            selected = found.map { it.uri }.toSet()
+                            // Files are selected by default; folders always require an explicit user choice.
+                            selected = found.filter { !it.isDirectory }.map { it.uri }.toSet()
                             status = "Análisis completado: ${found.size} elementos candidatos."
                         }
                     }.onFailure { status = "No se pudo analizar la carpeta: ${it.message ?: "error de acceso"}" }
