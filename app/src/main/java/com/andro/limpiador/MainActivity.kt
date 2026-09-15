@@ -44,6 +44,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -71,6 +73,8 @@ private fun CleanerApp() {
     val cleanerRepo = remember { CleanerRepository() }
     val settings by settingsRepo.settings.collectAsState(initial = CleanerSettings())
     val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     var candidates by remember { mutableStateOf<List<Candidate>>(emptyList()) }
     var selected by remember { mutableStateOf<Set<Uri>>(emptySet()) }
     var status by remember { mutableStateOf<String?>(null) }
@@ -181,7 +185,11 @@ private fun CleanerApp() {
                 label = { Text("Eliminar archivos con más de días") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { commitDays() }),
+                keyboardActions = KeyboardActions(onDone = {
+                    commitDays()
+                    focusManager.clearFocus()
+                    keyboardController?.hide()
+                }),
                 modifier = Modifier.fillMaxWidth().onFocusChanged { if (!it.isFocused) commitDays() }
             )
         }
