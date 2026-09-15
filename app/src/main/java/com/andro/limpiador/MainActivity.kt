@@ -12,6 +12,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,14 +20,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -45,6 +49,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -159,11 +164,18 @@ private fun CleanerApp() {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Column(Modifier.weight(1f)) {
                             Text("Descargas", style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                if (hasStorageAccess) "✓ Acceso concedido" else "Se necesita acceso a todos los archivos",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
+                            Surface(
+                                color = if (hasStorageAccess) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer,
+                                shape = MaterialTheme.shapes.small,
+                                modifier = Modifier.padding(top = 4.dp)
+                            ) {
+                                Text(
+                                    if (hasStorageAccess) "Acceso concedido" else "Acceso necesario",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (hasStorageAccess) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
+                            }
                         }
                         if (!hasStorageAccess) {
                             Button(onClick = {
@@ -179,16 +191,19 @@ private fun CleanerApp() {
                             }) { Text("Conceder acceso") }
                         }
                     }
-                    TextButton(onClick = { showExclusions = true }, modifier = Modifier.padding(top = 2.dp)) {
-                        Text("Exclusiones · ${settings.exclusions.size}")
+                    TextButton(onClick = { showExclusions = true }, modifier = Modifier.padding(top = 1.dp)) {
+                        Text("Gestionar exclusiones · ${settings.exclusions.size}")
                     }
                 }
             }
         }
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
-                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    Text("Eliminar archivos con más de", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Eliminar archivos con más de", style = MaterialTheme.typography.bodyMedium)
+                        Text("Antigüedad mínima", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     OutlinedTextField(
                         value = daysText,
                         onValueChange = { value ->
@@ -205,7 +220,7 @@ private fun CleanerApp() {
                             focusManager.clearFocus()
                             keyboardController?.hide()
                         }),
-                        modifier = Modifier.width(88.dp).onFocusChanged { if (!it.isFocused) commitDays() }
+                        modifier = Modifier.width(82.dp).onFocusChanged { if (!it.isFocused) commitDays() }
                     )
                 }
             }
@@ -214,16 +229,16 @@ private fun CleanerApp() {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
                     Text("Al analizar", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 6.dp))
-                    ModeRow("Revisar antes de eliminar", settings.mode == CleanMode.REVIEW) { scope.launch { settingsRepo.setMode(CleanMode.REVIEW) } }
-                    ModeRow("Eliminar archivos directamente", settings.mode == CleanMode.AUTOMATIC) { scope.launch { settingsRepo.setMode(CleanMode.AUTOMATIC) } }
+                    AnalysisModeOption("Revisar antes de eliminar", settings.mode == CleanMode.REVIEW) { scope.launch { settingsRepo.setMode(CleanMode.REVIEW) } }
+                    AnalysisModeOption("Eliminar archivos directamente", settings.mode == CleanMode.AUTOMATIC) { scope.launch { settingsRepo.setMode(CleanMode.AUTOMATIC) } }
                 }
             }
         }
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Column {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f).padding(end = 12.dp)) {
                             Text("Análisis programado", style = MaterialTheme.typography.titleSmall)
                             Text("Ejecutar automáticamente en segundo plano", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
@@ -268,7 +283,7 @@ private fun CleanerApp() {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("Último análisis · ${formatDate(settings.lastAnalysis)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("Última limpieza · ${formatDate(settings.lastCleanup)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                status?.let {
+                status?.takeIf { candidates.isEmpty() }?.let {
                     Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
                         Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp))
                     }
@@ -278,8 +293,19 @@ private fun CleanerApp() {
         if (settings.mode == CleanMode.REVIEW && candidates.isNotEmpty()) {
             item {
                 val selectedItems = candidates.filter { it.uri in selected }
-                Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth()) {
-                    Text("Seleccionados: ${selectedItems.size} · Se liberará: ${formatBytes(selectedItems.sumOf { it.sizeBytes })}", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
+                        Text("Análisis completado", style = MaterialTheme.typography.titleSmall)
+                        Text("${candidates.size} ${if (candidates.size == 1) "candidato" else "candidatos"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                        Row(modifier = Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Surface(color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.small) {
+                                Text("${selectedItems.size} seleccionados", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                            }
+                            Surface(color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.small) {
+                                Text("${formatBytes(selectedItems.sumOf { it.sizeBytes })} por liberar", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                            }
+                        }
+                    }
                 }
             }
             items(candidates, key = { it.uri.toString() }) { candidate ->
@@ -312,14 +338,25 @@ private fun ModeRow(label: String, checked: Boolean, enabled: Boolean = true, on
 }
 
 @Composable
+private fun AnalysisModeOption(label: String, selected: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label) },
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+    )
+}
+
+@Composable
 private fun CandidateRow(candidate: Candidate, checked: Boolean, onKeep: () -> Unit, onChecked: (Boolean) -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = if (checked) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant)
     ) {
-        Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp)) {
+        Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp), verticalAlignment = Alignment.Top) {
             Checkbox(checked = checked, onCheckedChange = onChecked)
-            Column(Modifier.padding(start = 6.dp, top = 2.dp, end = 4.dp)) {
+            TypeBadge(if (candidate.isDirectory) "C" else fileTypeLabel(candidate.name).take(1))
+            Column(Modifier.padding(start = 8.dp, top = 2.dp, end = 4.dp)) {
                 Text(candidate.name, style = MaterialTheme.typography.titleSmall)
                 val age = ((System.currentTimeMillis() - candidate.lastModified) / TimeUnit.DAYS.toMillis(1)).coerceAtLeast(0)
                 if (candidate.isDirectory) {
@@ -328,15 +365,33 @@ private fun CandidateRow(candidate: Candidate, checked: Boolean, onKeep: () -> U
                     Text("Contenido", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp))
                     Text(candidate.preview.joinToString(", ").ifEmpty { "—" } + if (candidate.preview.size >= 5) ", ..." else "", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
-                    val extension = candidate.name.substringAfterLast('.', "sin extensión")
-                    val extensionLabel = if (extension == "sin extensión") extension else ".$extension"
-                    Text("$extensionLabel · $age días", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${fileTypeLabel(candidate.name)} · $age días", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(formatBytes(candidate.sizeBytes), style = MaterialTheme.typography.bodySmall)
                     TextButton(onClick = onKeep, modifier = Modifier.padding(top = 2.dp)) { Text("Conservar siempre") }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun TypeBadge(label: String) {
+    Surface(
+        modifier = Modifier.size(32.dp),
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.primaryContainer
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+        }
+    }
+}
+
+private fun fileTypeLabel(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
+    "pdf" -> "PDF"
+    "jpg", "jpeg", "png", "webp", "gif" -> "Imagen"
+    "doc", "docx", "txt", "odt" -> "Documento"
+    else -> "Archivo"
 }
 
 private fun formatBytes(bytes: Long): String = when {
