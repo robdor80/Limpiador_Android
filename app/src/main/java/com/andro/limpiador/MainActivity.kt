@@ -46,6 +46,7 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import kotlinx.coroutines.launch
+import java.io.File
 import java.text.DateFormat
 import java.util.Date
 import java.util.concurrent.TimeUnit
@@ -69,6 +70,7 @@ private fun CleanerApp() {
     var selected by remember { mutableStateOf<Set<Uri>>(emptySet()) }
     var status by remember { mutableStateOf<String?>(null) }
     var confirmFolders by remember { mutableStateOf(false) }
+    var showExclusions by remember { mutableStateOf(false) }
     var hasStorageAccess by remember { mutableStateOf(hasAllFilesAccess()) }
 
     LaunchedEffect(settings.automaticEnabled, settings.frequency, settings.mode) {
@@ -101,6 +103,25 @@ private fun CleanerApp() {
         )
     }
 
+    if (showExclusions) {
+        AlertDialog(
+            onDismissRequest = { showExclusions = false },
+            title = { Text("Exclusiones (${settings.exclusions.size})") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (settings.exclusions.isEmpty()) Text("No hay archivos excluidos.")
+                    settings.exclusions.sorted().forEach { path ->
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(File(path).name, modifier = Modifier.weight(1f))
+                            TextButton(onClick = { scope.launch { settingsRepo.removeExclusion(path) } }) { Text("Quitar exclusión") }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showExclusions = false }) { Text("Cerrar") } }
+        )
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -129,6 +150,9 @@ private fun CleanerApp() {
             Text(if (hasStorageAccess) "Acceso concedido" else "Se necesita acceso a todos los archivos")
         }
         item {
+            TextButton(onClick = { showExclusions = true }) { Text("Exclusiones (${settings.exclusions.size})") }
+        }
+        item {
             OutlinedTextField(
                 value = settings.days.toString(),
                 onValueChange = { value -> value.toIntOrNull()?.takeIf { it >= 0 }?.let { scope.launch { settingsRepo.setDays(it) } } },
@@ -154,7 +178,7 @@ private fun CleanerApp() {
                 hasStorageAccess = hasAllFilesAccess()
                 if (!hasStorageAccess) { status = "Concede primero acceso a todos los archivos."; return@Button }
                 scope.launch {
-                    runCatching { cleanerRepo.analyze(settings.days) }.onSuccess { found ->
+                    runCatching { cleanerRepo.analyze(settings.days, settings.exclusions) }.onSuccess { found ->
                         settingsRepo.markAnalysis()
                         candidates = found
                         if (settings.mode == CleanMode.AUTOMATIC) {
@@ -184,7 +208,11 @@ private fun CleanerApp() {
                 Text("Seleccionados: ${selectedItems.size} · Se liberará: ${formatBytes(selectedItems.sumOf { it.sizeBytes })}")
             }
             items(candidates, key = { it.uri.toString() }) { candidate ->
-                CandidateRow(candidate, candidate.uri in selected) { checked ->
+                CandidateRow(candidate, candidate.uri in selected, onKeep = {
+                    scope.launch { settingsRepo.addExclusion(candidate.canonicalPath) }
+                    candidates = candidates.filterNot { it.uri == candidate.uri }
+                    selected = selected - candidate.uri
+                }) { checked ->
                     selected = if (checked) selected + candidate.uri else selected - candidate.uri
                 }
             }
@@ -209,7 +237,7 @@ private fun ModeRow(label: String, checked: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun CandidateRow(candidate: Candidate, checked: Boolean, onChecked: (Boolean) -> Unit) {
+private fun CandidateRow(candidate: Candidate, checked: Boolean, onKeep: () -> Unit, onChecked: (Boolean) -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(modifier = Modifier.padding(10.dp)) {
             Checkbox(checked = checked, onCheckedChange = onChecked)
@@ -223,6 +251,7 @@ private fun CandidateRow(candidate: Candidate, checked: Boolean, onChecked: (Boo
                     val extension = candidate.name.substringAfterLast('.', "sin extensión")
                     val extensionLabel = if (extension == "sin extensión") extension else ".$extension"
                     Text("$extensionLabel · ${formatBytes(candidate.sizeBytes)} · $age días")
+                    TextButton(onClick = onKeep) { Text("Conservar siempre") }
                 }
             }
         }

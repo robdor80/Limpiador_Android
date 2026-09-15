@@ -15,7 +15,7 @@ class CleanerWorker(context: Context, params: WorkerParameters) : CoroutineWorke
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) return Result.success()
         return runCatching {
             val repository = CleanerRepository()
-            val candidates = repository.analyze(settings.days)
+            val candidates = repository.analyze(settings.days, settings.exclusions)
             // Safety rule: scheduled cleanup never removes folders.
             val files = candidates.filter { !it.isDirectory }.map { it.uri }.toSet()
             val result = repository.deleteSelected(files)

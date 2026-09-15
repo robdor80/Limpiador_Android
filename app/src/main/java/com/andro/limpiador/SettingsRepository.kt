@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -20,6 +21,7 @@ data class CleanerSettings(
     val mode: CleanMode = CleanMode.REVIEW,
     val automaticEnabled: Boolean = false,
     val frequency: Frequency = Frequency.DAILY,
+    val exclusions: Set<String> = emptySet(),
     val lastAnalysis: Long? = null,
     val lastCleanup: Long? = null
 )
@@ -31,6 +33,7 @@ class SettingsRepository(private val context: Context) {
         val MODE = stringPreferencesKey("mode")
         val AUTO = booleanPreferencesKey("automatic_enabled")
         val FREQUENCY = stringPreferencesKey("frequency")
+        val EXCLUSIONS = stringSetPreferencesKey("exclusions")
         val LAST_ANALYSIS = stringPreferencesKey("last_analysis")
         val LAST_CLEANUP = stringPreferencesKey("last_cleanup")
     }
@@ -41,6 +44,7 @@ class SettingsRepository(private val context: Context) {
             mode = runCatching { CleanMode.valueOf(p[Keys.MODE] ?: "REVIEW") }.getOrDefault(CleanMode.REVIEW),
             automaticEnabled = p[Keys.AUTO] ?: false,
             frequency = runCatching { Frequency.valueOf(p[Keys.FREQUENCY] ?: "DAILY") }.getOrDefault(Frequency.DAILY),
+            exclusions = p[Keys.EXCLUSIONS] ?: emptySet(),
             lastAnalysis = p[Keys.LAST_ANALYSIS]?.toLongOrNull(),
             lastCleanup = p[Keys.LAST_CLEANUP]?.toLongOrNull()
         )
@@ -51,6 +55,12 @@ class SettingsRepository(private val context: Context) {
     suspend fun setMode(mode: CleanMode) = context.dataStore.edit { it[Keys.MODE] = mode.name }
     suspend fun setAutomatic(enabled: Boolean) = context.dataStore.edit { it[Keys.AUTO] = enabled }
     suspend fun setFrequency(frequency: Frequency) = context.dataStore.edit { it[Keys.FREQUENCY] = frequency.name }
+    suspend fun addExclusion(path: String) = context.dataStore.edit {
+        it[Keys.EXCLUSIONS] = (it[Keys.EXCLUSIONS] ?: emptySet()) + path
+    }
+    suspend fun removeExclusion(path: String) = context.dataStore.edit {
+        it[Keys.EXCLUSIONS] = (it[Keys.EXCLUSIONS] ?: emptySet()) - path
+    }
     suspend fun markAnalysis() = context.dataStore.edit { it[Keys.LAST_ANALYSIS] = System.currentTimeMillis().toString() }
     suspend fun markCleanup() = context.dataStore.edit { it[Keys.LAST_CLEANUP] = System.currentTimeMillis().toString() }
 }

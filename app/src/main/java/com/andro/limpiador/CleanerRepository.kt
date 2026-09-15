@@ -9,6 +9,7 @@ import java.util.concurrent.TimeUnit
 
 data class Candidate(
     val uri: Uri,
+    val canonicalPath: String,
     val name: String,
     val isDirectory: Boolean,
     val lastModified: Long,
@@ -19,7 +20,7 @@ data class Candidate(
 )
 
 class CleanerRepository {
-    suspend fun analyze(days: Int): List<Candidate> = withContext(Dispatchers.IO) {
+    suspend fun analyze(days: Int, excludedPaths: Set<String> = emptySet()): List<Candidate> = withContext(Dispatchers.IO) {
         val root = downloadsDirectory()
         if (!root.isDirectory) return@withContext emptyList()
         val rootCanonical = runCatching { root.canonicalFile }.getOrElse { return@withContext emptyList() }
@@ -27,14 +28,16 @@ class CleanerRepository {
         val cutoff = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(days.toLong())
         children.mapNotNull { file ->
             if (!isDirectChild(file, rootCanonical)) return@mapNotNull null
+            val canonicalFile = runCatching { file.canonicalFile }.getOrElse { return@mapNotNull null }
+            if (canonicalFile.path in excludedPaths) return@mapNotNull null
             // A missing/invalid timestamp is uncertain: preserve the item.
             val modified = file.lastModified()
             if (modified <= 0L || modified >= cutoff) return@mapNotNull null
             if (file.isDirectory) {
                 val summary = summarize(file, rootCanonical)
-                Candidate(Uri.fromFile(file), file.name.ifBlank { "(sin nombre)" }, true, modified, summary.size, summary.files, summary.folders, summary.preview)
+                Candidate(Uri.fromFile(canonicalFile), canonicalFile.path, file.name.ifBlank { "(sin nombre)" }, true, modified, summary.size, summary.files, summary.folders, summary.preview)
             } else if (file.isFile) {
-                Candidate(Uri.fromFile(file), file.name.ifBlank { "(sin nombre)" }, false, modified, file.length().coerceAtLeast(0L))
+                Candidate(Uri.fromFile(canonicalFile), canonicalFile.path, file.name.ifBlank { "(sin nombre)" }, false, modified, file.length().coerceAtLeast(0L))
             } else null
         }.sortedWith(compareByDescending<Candidate> { it.isDirectory }.thenBy { it.name.lowercase() })
     }
