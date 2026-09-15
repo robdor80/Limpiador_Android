@@ -24,12 +24,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.text.KeyboardActions
@@ -144,68 +145,95 @@ private fun CleanerApp() {
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        item { Text("LIMPIADOR DE DESCARGAS", style = MaterialTheme.typography.headlineSmall) }
+        item { Text("Limpiador de descargas", style = MaterialTheme.typography.titleLarge) }
         item {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column(Modifier.weight(1f)) {
-                    Text("Carpeta")
-                    Text("Descargas")
-                }
-                if (!hasStorageAccess) {
-                    Button(onClick = {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                            val appIntent = Intent(
-                                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                                Uri.parse("package:${context.packageName}")
-                            )
-                            runCatching { accessSettingsLauncher.launch(appIntent) }.onFailure {
-                                accessSettingsLauncher.launch(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-                            }
-                        }
-                    }) { Text("Conceder acceso") }
-                }
-            }
-            Text(if (hasStorageAccess) "Acceso concedido" else "Se necesita acceso a todos los archivos")
-        }
-        item {
-            TextButton(onClick = { showExclusions = true }) { Text("Exclusiones (${settings.exclusions.size})") }
-        }
-        item {
-            OutlinedTextField(
-                value = daysText,
-                onValueChange = { value ->
-                    if (value.all { it in '0'..'9' }) {
-                        daysText = value
-                        value.toIntOrNull()?.let { scope.launch { settingsRepo.setDays(it) } }
+            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Descargas", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            if (hasStorageAccess) "✓ Acceso concedido" else "Se necesita acceso a todos los archivos",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
                     }
-                },
-                label = { Text("Eliminar archivos con más de días") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = {
-                    commitDays()
-                    focusManager.clearFocus()
-                    keyboardController?.hide()
-                }),
-                modifier = Modifier.fillMaxWidth().onFocusChanged { if (!it.isFocused) commitDays() }
-            )
-        }
-        item {
-            Text("Modo")
-            ModeRow("Revisar antes de eliminar", settings.mode == CleanMode.REVIEW) { scope.launch { settingsRepo.setMode(CleanMode.REVIEW) } }
-            ModeRow("Eliminar automáticamente", settings.mode == CleanMode.AUTOMATIC) { scope.launch { settingsRepo.setMode(CleanMode.AUTOMATIC) } }
+                    if (!hasStorageAccess) {
+                        Button(onClick = {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                val appIntent = Intent(
+                                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                    Uri.parse("package:${context.packageName}")
+                                )
+                                runCatching { accessSettingsLauncher.launch(appIntent) }.onFailure {
+                                    accessSettingsLauncher.launch(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                                }
+                            }
+                        }) { Text("Conceder acceso") }
+                    }
+                }
+            }
         }
         item {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Limpieza automática")
-                Switch(checked = settings.automaticEnabled, onCheckedChange = { scope.launch { settingsRepo.setAutomatic(it) } })
+                TextButton(onClick = { showExclusions = true }) { Text("Exclusiones (${settings.exclusions.size})") }
             }
-            Text("Frecuencia")
-            ModeRow("Diaria", settings.frequency == Frequency.DAILY) { scope.launch { settingsRepo.setFrequency(Frequency.DAILY) } }
-            ModeRow("Semanal", settings.frequency == Frequency.WEEKLY) { scope.launch { settingsRepo.setFrequency(Frequency.WEEKLY) } }
+        }
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text("Eliminar archivos con más de", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    OutlinedTextField(
+                        value = daysText,
+                        onValueChange = { value ->
+                            if (value.all { it in '0'..'9' }) {
+                                daysText = value
+                                value.toIntOrNull()?.let { scope.launch { settingsRepo.setDays(it) } }
+                            }
+                        },
+                        label = { Text("Días") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = {
+                            commitDays()
+                            focusManager.clearFocus()
+                            keyboardController?.hide()
+                        }),
+                        modifier = Modifier.weight(0.42f).onFocusChanged { if (!it.isFocused) commitDays() }
+                    )
+                }
+            }
+        }
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+                    Text("Modo", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 6.dp))
+                    ModeRow("Revisar antes de eliminar", settings.mode == CleanMode.REVIEW) { scope.launch { settingsRepo.setMode(CleanMode.REVIEW) } }
+                    ModeRow("Eliminar automáticamente", settings.mode == CleanMode.AUTOMATIC) { scope.launch { settingsRepo.setMode(CleanMode.AUTOMATIC) } }
+                }
+            }
+        }
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Column {
+                            Text("Limpieza automática", style = MaterialTheme.typography.titleSmall)
+                            Text("Solo elimina archivos", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(checked = settings.automaticEnabled, onCheckedChange = { scope.launch { settingsRepo.setAutomatic(it) } })
+                    }
+                    Text(
+                        "Frecuencia",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (settings.automaticEnabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    ModeRow("Diaria", settings.frequency == Frequency.DAILY, settings.automaticEnabled) { scope.launch { settingsRepo.setFrequency(Frequency.DAILY) } }
+                    ModeRow("Semanal", settings.frequency == Frequency.WEEKLY, settings.automaticEnabled) { scope.launch { settingsRepo.setFrequency(Frequency.WEEKLY) } }
+                }
+            }
         }
         item {
             Button(modifier = Modifier.fillMaxWidth(), onClick = {
@@ -230,17 +258,25 @@ private fun CleanerApp() {
                         }
                     }.onFailure { status = "No se pudo analizar la carpeta: ${it.message ?: "error de acceso"}" }
                 }
-            }) { Text("ANALIZAR AHORA") }
+            }) { Text("Analizar ahora") }
         }
         item {
-            Text("Último análisis: ${formatDate(settings.lastAnalysis)}")
-            Text("Última limpieza: ${formatDate(settings.lastCleanup)}")
-            status?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Último análisis · ${formatDate(settings.lastAnalysis)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Última limpieza · ${formatDate(settings.lastCleanup)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                status?.let {
+                    Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp))
+                    }
+                }
+            }
         }
         if (settings.mode == CleanMode.REVIEW && candidates.isNotEmpty()) {
             item {
                 val selectedItems = candidates.filter { it.uri in selected }
-                Text("Seleccionados: ${selectedItems.size} · Se liberará: ${formatBytes(selectedItems.sumOf { it.sizeBytes })}")
+                Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth()) {
+                    Text("Seleccionados: ${selectedItems.size} · Se liberará: ${formatBytes(selectedItems.sumOf { it.sizeBytes })}", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                }
             }
             items(candidates, key = { it.uri.toString() }) { candidate ->
                 CandidateRow(candidate, candidate.uri in selected, onKeep = {
@@ -252,9 +288,9 @@ private fun CleanerApp() {
                 }
             }
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = { candidates = emptyList(); selected = emptySet(); status = null }) { Text("Cancelar") }
-                    Button(enabled = selected.isNotEmpty(), onClick = {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(modifier = Modifier.weight(1f), onClick = { candidates = emptyList(); selected = emptySet(); status = null }) { Text("Cancelar") }
+                    Button(modifier = Modifier.weight(1.4f), enabled = selected.isNotEmpty(), onClick = {
                         if (candidates.any { it.uri in selected && it.isDirectory }) confirmFolders = true else removeSelection()
                     }) { Text("Eliminar seleccionados") }
                 }
@@ -264,29 +300,35 @@ private fun CleanerApp() {
 }
 
 @Composable
-private fun ModeRow(label: String, checked: Boolean, onClick: () -> Unit) {
+private fun ModeRow(label: String, checked: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-        RadioButton(selected = checked, onClick = onClick)
-        Text(label, modifier = Modifier.padding(start = 6.dp))
+        RadioButton(selected = checked, enabled = enabled, onClick = if (enabled) onClick else null)
+        Text(label, modifier = Modifier.padding(start = 6.dp), color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
 private fun CandidateRow(candidate: Candidate, checked: Boolean, onKeep: () -> Unit, onChecked: (Boolean) -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Row(modifier = Modifier.padding(10.dp)) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = if (checked) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp)) {
             Checkbox(checked = checked, onCheckedChange = onChecked)
-            Column(Modifier.padding(start = 6.dp)) {
-                Text(candidate.name)
+            Column(Modifier.padding(start = 6.dp, top = 2.dp, end = 4.dp)) {
+                Text(candidate.name, style = MaterialTheme.typography.titleSmall)
                 val age = ((System.currentTimeMillis() - candidate.lastModified) / TimeUnit.DAYS.toMillis(1)).coerceAtLeast(0)
                 if (candidate.isDirectory) {
-                    Text("Carpeta · ${formatBytes(candidate.sizeBytes)} · ${candidate.fileCount} archivos · ${candidate.folderCount} subcarpetas · $age días")
-                    Text("Contenido: ${candidate.preview.joinToString(", ")}${if (candidate.preview.size >= 5) ", ..." else ""}")
+                    Text("Carpeta · $age días", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${formatBytes(candidate.sizeBytes)} · ${candidate.fileCount} archivos · ${candidate.folderCount} subcarpetas", style = MaterialTheme.typography.bodySmall)
+                    Text("Contenido", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp))
+                    Text(candidate.preview.joinToString(", ").ifEmpty { "—" } + if (candidate.preview.size >= 5) ", ..." else "", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     val extension = candidate.name.substringAfterLast('.', "sin extensión")
                     val extensionLabel = if (extension == "sin extensión") extension else ".$extension"
-                    Text("$extensionLabel · ${formatBytes(candidate.sizeBytes)} · $age días")
-                    TextButton(onClick = onKeep) { Text("Conservar siempre") }
+                    Text("$extensionLabel · $age días", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(formatBytes(candidate.sizeBytes), style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = onKeep, modifier = Modifier.padding(top = 2.dp)) { Text("Conservar siempre") }
                 }
             }
         }
