@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
@@ -55,8 +56,11 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import kotlinx.coroutines.launch
 import java.io.File
-import java.text.DateFormat
-import java.util.Date
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
@@ -151,34 +155,34 @@ private fun CleanerApp() {
         item { Text("Limpiador de descargas", style = MaterialTheme.typography.titleLarge) }
         item {
             Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
-                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Descargas", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            if (hasStorageAccess) "✓ Acceso concedido" else "Se necesita acceso a todos los archivos",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                    }
-                    if (!hasStorageAccess) {
-                        Button(onClick = {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                                val appIntent = Intent(
-                                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                                    Uri.parse("package:${context.packageName}")
-                                )
-                                runCatching { accessSettingsLauncher.launch(appIntent) }.onFailure {
-                                    accessSettingsLauncher.launch(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Descargas", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                if (hasStorageAccess) "✓ Acceso concedido" else "Se necesita acceso a todos los archivos",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                        if (!hasStorageAccess) {
+                            Button(onClick = {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                    val appIntent = Intent(
+                                        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                        Uri.parse("package:${context.packageName}")
+                                    )
+                                    runCatching { accessSettingsLauncher.launch(appIntent) }.onFailure {
+                                        accessSettingsLauncher.launch(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                                    }
                                 }
-                            }
-                        }) { Text("Conceder acceso") }
+                            }) { Text("Conceder acceso") }
+                        }
+                    }
+                    TextButton(onClick = { showExclusions = true }, modifier = Modifier.padding(top = 2.dp)) {
+                        Text("Exclusiones · ${settings.exclusions.size}")
                     }
                 }
-            }
-        }
-        item {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(onClick = { showExclusions = true }) { Text("Exclusiones (${settings.exclusions.size})") }
             }
         }
         item {
@@ -201,7 +205,7 @@ private fun CleanerApp() {
                             focusManager.clearFocus()
                             keyboardController?.hide()
                         }),
-                        modifier = Modifier.weight(0.42f).onFocusChanged { if (!it.isFocused) commitDays() }
+                        modifier = Modifier.width(88.dp).onFocusChanged { if (!it.isFocused) commitDays() }
                     )
                 }
             }
@@ -209,9 +213,9 @@ private fun CleanerApp() {
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
-                    Text("Modo", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 6.dp))
+                    Text("Al analizar", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 6.dp))
                     ModeRow("Revisar antes de eliminar", settings.mode == CleanMode.REVIEW) { scope.launch { settingsRepo.setMode(CleanMode.REVIEW) } }
-                    ModeRow("Eliminar automáticamente", settings.mode == CleanMode.AUTOMATIC) { scope.launch { settingsRepo.setMode(CleanMode.AUTOMATIC) } }
+                    ModeRow("Eliminar archivos directamente", settings.mode == CleanMode.AUTOMATIC) { scope.launch { settingsRepo.setMode(CleanMode.AUTOMATIC) } }
                 }
             }
         }
@@ -220,8 +224,8 @@ private fun CleanerApp() {
                 Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         Column {
-                            Text("Limpieza automática", style = MaterialTheme.typography.titleSmall)
-                            Text("Solo elimina archivos", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Análisis programado", style = MaterialTheme.typography.titleSmall)
+                            Text("Ejecutar automáticamente en segundo plano", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Switch(checked = settings.automaticEnabled, onCheckedChange = { scope.launch { settingsRepo.setAutomatic(it) } })
                     }
@@ -341,7 +345,16 @@ private fun formatBytes(bytes: Long): String = when {
     else -> "%.1f MB".format(bytes / 1024.0 / 1024.0)
 }
 
-private fun formatDate(value: Long?): String = value?.let { DateFormat.getDateTimeInstance().format(Date(it)) } ?: "Nunca"
+private fun formatDate(value: Long?): String {
+    if (value == null) return "Nunca"
+    val dateTime = Instant.ofEpochMilli(value).atZone(ZoneId.systemDefault()).toLocalDateTime()
+    val time = dateTime.format(DateTimeFormatter.ofPattern("HH:mm", Locale("es", "ES")))
+    return if (dateTime.toLocalDate() == LocalDate.now()) {
+        "Hoy, $time"
+    } else {
+        "${dateTime.format(DateTimeFormatter.ofPattern("d MMM", Locale("es", "ES")))}, $time"
+    }
+}
 
 private fun hasAllFilesAccess(): Boolean =
     Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
