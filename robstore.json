@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "name": "Limpiador Android",
+  "description": "Aplicación de limpieza para Android.",
+  "packageName": "com.andro.limpiador",
+  "icon": "app/src/main/res/drawable-nodpi/ic_launcher_art.png",
+  "apkAssetName": "Limpiador_Android_v1.0.apk",
+  "versionCode": 1,
+  "versionName": "0.1"
+}
